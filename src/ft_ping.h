@@ -10,6 +10,7 @@
 # include <arpa/inet.h>
 # include <unistd.h>
 # include <netdb.h>
+# include <sys/time.h>
 
 typedef struct s_ping {
     char *command;
