@@ -1,9 +1,9 @@
 #include "ft_ping.h"
 
-long get_current_time_ms() {
+double get_current_time_ms() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    return (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+    return (double)(tv.tv_sec * 1000.0) + (tv.tv_usec / 1000.0);
 }
 
 int check_input(int argc, char **input, t_ping *ping) {
@@ -32,7 +32,7 @@ int check_input(int argc, char **input, t_ping *ping) {
     return 0;
 }
 
-struct sockaddr_in resolve_address(const char *host) {
+struct sockaddr_in resolve_address(const char *host, int verbose) {
     struct addrinfo hints, *res;
     struct sockaddr_in addr;
 
@@ -42,6 +42,7 @@ struct sockaddr_in resolve_address(const char *host) {
         dprintf(2, "ping: %s: Temporary failure in name resolution\n", host);
         exit(EXIT_FAILURE);
     }
+    (void)verbose;
     memcpy(&addr, res->ai_addr, sizeof(addr));
     freeaddrinfo(res);
     return addr;
@@ -62,14 +63,12 @@ unsigned short checksum(void *b, int len) {
     return result;
 }
 
-// Envoi d'un paquet ICMP Echo Request
-void send_ping(int sockfd, struct sockaddr_in *addr, unsigned short sequence, long *start_time, int verbose) {
+
+void send_ping(int sockfd, struct sockaddr_in *addr, unsigned short sequence, double *start_time) {
     char packet[64];
     struct icmphdr *icmp = (struct icmphdr *)packet;
 
     memset(packet, 0, sizeof(packet));
-
-    // Configuration du paquet ICMP
     icmp->type = ICMP_ECHO;
     icmp->code = 0;
     icmp->checksum = 0;
@@ -78,21 +77,17 @@ void send_ping(int sockfd, struct sockaddr_in *addr, unsigned short sequence, lo
 
     icmp->checksum = checksum(packet, sizeof(packet));
 
-    *start_time = get_current_time_ms(); // Enregistrer l'heure d'envoi
+    *start_time = get_current_time_ms(); 
 
     if (sendto(sockfd, packet, sizeof(packet), 0, (struct sockaddr *)addr, sizeof(*addr)) <= 0) {
         perror("sendto");
         exit(EXIT_FAILURE);
     }
-
-    if (verbose) {
-        printf("Ping sent to %s with icmp_seq=%d\n", inet_ntoa(addr->sin_addr), sequence);
-    }
 }
 
 
-// Réception d'un paquet ICMP Echo Reply
-void receive_ping(int sockfd, long start_time, unsigned short sequence, int verbose) {
+
+void receive_ping(int sockfd, double start_time, unsigned short sequence, int verbose) {
     char buffer[1024];
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(addr);
@@ -106,27 +101,16 @@ void receive_ping(int sockfd, long start_time, unsigned short sequence, int verb
         exit(EXIT_FAILURE);
     }
 
-    // Calcul de l'heure de réception
     end_time = get_current_time_ms();
 
-    // Extraire les en-têtes IP et ICMP
     ip = (struct iphdr *)buffer;
     icmp = (struct icmphdr *)(buffer + (ip->ihl * 4));
-
-    // Mode verbose : afficher les détails du paquet reçu
-    if (verbose) {
-        printf("Received packet: bytes=%d, type=%d, code=%d\n",
-               bytes, icmp->type, icmp->code);
-    }
-
-    // Vérifie si c'est une réponse ICMP Echo Reply
     if (icmp->type == ICMP_ECHOREPLY) {
+        double rtt = end_time - start_time;
         printf("%d bytes from %s: icmp_seq=%d ttl=%d time=%.1f ms\n",
-               bytes - (ip->ihl * 4),                  // Taille des données
-               inet_ntoa(addr.sin_addr),              // Adresse source
-               sequence,                               // Numéro de séquence
-               ip->ttl,                                // TTL
-               (double)(end_time - start_time));       // RTT en ms
+               bytes - (ip->ihl * 4), inet_ntoa(addr.sin_addr), sequence, ip->ttl, rtt);
+    } else if (verbose) {
+        printf("Received unexpected ICMP packet: type=%d, code=%d\n", icmp->type, icmp->code);
     }
 }
 
@@ -140,32 +124,38 @@ int main(int argc, char **argv) {
     t_ping ping;
 
     if (check_input(argc, argv, &ping)) {
-        return 1; // Erreur dans les entrées
+        return 1; 
     }
 
-    // Résolution de l'adresse cible
-    ping.addr = resolve_address(ping.target);
+    if (ping.help) {
+        printf("Usage: ping [options] <destination>\n");
+        printf("Options:\n");
+        printf("  -v     Enable verbose output\n");
+        printf("  -?     Display this help message\n");
+        return 0;
+    }
+    ping.addr = resolve_address(ping.target, ping.verbose);
 
-    // Création du socket
     int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (sockfd < 0) {
         perror("socket");
         return 1;
     }
 
-    // Afficher l'en-tête similaire à ping
-    printf("PING %s (%s) 56(84) bytes of data.\n",
-           ping.target, inet_ntoa(ping.addr.sin_addr));
+    if (ping.verbose) {
+        printf("sock4.fd: %d (socktype: SOCK_RAW), hints.ai_family: AF_UNSPEC\n\n", sockfd);
+        printf("ai->ai_family: AF_INET, ai->ai_canonname: '%s'\n", ping.target);
+    }
+    printf("PING %s (%s) 56(84) bytes of data.\n", ping.target, inet_ntoa(ping.addr.sin_addr));
 
     unsigned short sequence = 1;
-    while (1) { // Boucle infinie pour envoyer les pings
-        long start_time;
-        send_ping(sockfd, &ping.addr, sequence, &start_time, ping.verbose);
+    while (1) { 
+        double start_time;
+        send_ping(sockfd, &ping.addr, sequence, &start_time);
         receive_ping(sockfd, start_time, sequence, ping.verbose);
         sequence++;
-        sleep(1); // Pause d'une seconde entre les pings
+        sleep(1);
     }
-
     close(sockfd);
     return 0;
 }
