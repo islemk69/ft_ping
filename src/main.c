@@ -10,8 +10,6 @@ int check_input(int argc, char **input, t_ping *ping) {
     memset(ping, 0, sizeof(t_ping));
     if (strncmp(input[1], "ping", 5))
         return dprintf(2, "Error: Invalid command '%s'\n", input[1]);
-    if (!input[2])
-        return dprintf(2, "ping: usage error: Destination address required\n");
     ping->command = input[1];
     for (int i = 2; i < argc; i++){
         if (!strncmp(input[i], "-v", 3))
@@ -84,8 +82,6 @@ void send_ping(int sockfd, struct sockaddr_in *addr, unsigned short sequence, do
         exit(EXIT_FAILURE);
     }
 }
-
-
 
 void receive_ping(int sockfd, double start_time, unsigned short sequence, int verbose) {
     char buffer[1024];
